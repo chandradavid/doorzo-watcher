@@ -1,0 +1,51 @@
+name: watch
+
+on:
+  schedule:
+    # Every 5 minutes from 6:00 AM to 11:59 PM Japan time (UTC+9).
+    # GitHub schedules run in UTC and often start a few minutes late.
+    - cron: "*/5 21-23,0-14 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: write
+
+# Never let two checks run at once, or they would both alert for the same item.
+concurrency:
+  group: watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      # seen.json (items already alerted) is kept in the Actions cache rather
+      # than committed, so the repository history stays clean.
+      - uses: actions/cache/restore@v4
+        with:
+          path: seen.json
+          key: seen-${{ github.run_id }}
+          restore-keys: seen-
+
+      - name: Check Doorzo
+        run: python3 watcher.py
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+
+      - uses: actions/cache/save@v4
+        if: always() && hashFiles('seen.json') != ''
+        with:
+          path: seen.json
+          key: seen-${{ github.run_id }}
+
+      # GitHub turns off schedules in public repositories after 60 days with
+      # no activity. Re-enabling the workflow on each run resets that timer.
+      - name: Keep schedule alive
+        if: always()
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/watch.yml/enable"
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -1,0 +1,9 @@
+{
+  "watches": [
+    {
+      "keyword": "ポケモンカード",
+      "sites": ["mercari"],
+      "max_alerts_per_check": 3
+    }
+  ]
+}

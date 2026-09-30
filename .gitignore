@@ -1,0 +1,4 @@
+seen.json
+*.tmp
+*.log
+__pycache__/
