@@ -1,14 +1,6 @@
 {
   "watches": [
     {
-      "keyword": "ポケモンカード",
-      "note": "Pokémon cards, test",
-      "sites": [
-        "mercari"
-      ],
-      "max_alerts_per_check": 3
-    },
-    {
       "keyword": "ゼナック",
       "note": "Zenaq fishing rods",
       "category": "1172",
