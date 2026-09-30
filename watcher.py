@@ -21,25 +21,37 @@ CONFIG_PATH = os.path.join(HERE, "config.json")
 SEEN_PATH = os.path.join(HERE, "seen.json")
 
 SEARCH_URL = "https://www.doorzo.com/sigapi"
-ITEM_URL = "https://www.doorzo.com/en/mall/{site}/detail/{url}"
+DOORZO = "https://www.doorzo.com/en"
 NTFY_URL = "https://ntfy.sh/"
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/128 Safari/537.36"
 )
-# Keep at most this many item IDs per keyword, so seen.json stays small.
-SEEN_LIMIT = 500
+# Keep at most this many item IDs per keyword. A search across every
+# marketplace returns about 100 items, so this holds several checks' worth.
+SEEN_LIMIT = 1000
 
-# Doorzo reports the source marketplace as ItemType. Each maps to the site
-# name Doorzo uses in its item page URLs, and a label for the notification.
-# ITEM_TYPE_BEYOND is Mercari Shops (business sellers on Mercari).
-SITE_BY_ITEM_TYPE = {
-    "ITEM_TYPE_MERCARI": ("mercari", "Mercari"),
-    "ITEM_TYPE_BEYOND": ("mercari", "Mercari Shops"),
-    "ITEM_TYPE_YAHOO": ("yahoo", "Yahoo Auctions"),
-    "ITEM_TYPE_RAKUMA": ("rakuma", "Rakuma"),
-    "ITEM_TYPE_PAYPAY": ("paypay", "PayPay Flea Market"),
+# Doorzo numbers each marketplace with the item's "Type". For each one: the
+# label shown in the alert, and how Doorzo builds that item's page URL
+# (copied from the link builder in Doorzo's own search page).
+MARKETPLACES = {
+    1: ("Mercari", lambda i: "/mall/mercari/detail/%s" % i["Url"]),
+    2: ("Rakuma", lambda i: "/mall/rakuma/detail/%s" % i["Url"]),
+    3: ("Doorzo Market", lambda i: "/mall/market/detail/%s" % i["Url"]),
+    4: ("Surugaya", lambda i: "/mall/surugaya/detail/%s" % quote(i["Url"])),
+    5: ("PayPay Flea Market", lambda i: "/mall/paypay/detail/%s" % i["Url"]),
+    6: ("Rakuten", lambda i: "/mall/rakuten/detail/%s" % quote(i["Url"])),
+    7: ("Yahoo Auctions", lambda i: "/mall/yahoo/detail/%s" % quote(i["Url"])),
+    8: ("minne", lambda i: "/mall/minne/detail?url=%s&id=%s" % (i["Url"], i.get("Asin", ""))),
+    9: ("Amazon", lambda i: "/mall/amazon/detail/%s" % i["Asin"]),
+    10: ("Lashinbang", lambda i: "/mall/lashinbang/detail/%s" % i["Asin"]),
+    11: ("Bunjang", lambda i: "/mall/bunjang/detail/%s" % i["Asin"]),
+    12: ("Snkrdunk", lambda i: "/mall/snkrdunk/detail/%s" % quote(i["Asin"])),
 }
+
+
+def quote(value):
+    return urllib.parse.quote(value, safe="")
 
 
 def load_json(path, default):
@@ -58,7 +70,7 @@ def save_json(path, data):
 
 
 def search(watch):
-    """Return the newest items for one watch entry, newest first."""
+    """Return the items Doorzo lists for one watch entry."""
     params = {
         "n": "Sig.Front.SubSite.AppGlobal.MixSearch",
         "from": "INTERNATIONAL",
@@ -67,12 +79,16 @@ def search(watch):
         "keyword": watch["keyword"],
         "filter": "lashinbang",
         "onlyInStock": "1",
-        # "created_desc" is Doorzo's "newest first" sort for Mercari. Without
-        # it, results come back in relevance order and new listings are missed.
+        # "created_desc" is Doorzo's "newest first" sort. Without it, Mercari
+        # results come back in relevance order and new listings are missed.
         "orderBy": watch.get("sort", "created_desc"),
     }
+    # No "sites" means every marketplace Doorzo searches.
     if watch.get("sites"):
         params["website"] = ",".join(watch["sites"])
+    # Doorzo category code, for example "1172" for Sports & Outdoors > Fishing.
+    if watch.get("category"):
+        params["category"] = str(watch["category"])
     if watch.get("max_price"):
         params["priceMax"] = str(watch["max_price"])
     if watch.get("min_price"):
@@ -89,12 +105,49 @@ def search(watch):
     return (body.get("data") or {}).get("items") or []
 
 
+def item_id(item):
+    """A stable ID per item. Some marketplaces give no Asin, but every item has a Url."""
+    key = item.get("Asin") or item.get("Url")
+    return "%s:%s" % (item.get("Type"), key) if key else None
+
+
+def marketplace_label(item):
+    if item.get("ItemType") == "ITEM_TYPE_BEYOND":
+        return "Mercari Shops"  # business sellers on Mercari
+    return MARKETPLACES.get(item.get("Type"), ("Doorzo", None))[0]
+
+
 def item_link(item):
-    site = SITE_BY_ITEM_TYPE.get(item.get("ItemType"), (None, None))[0]
-    if site and item.get("Url") and "/" not in item["Url"]:
-        return ITEM_URL.format(site=site, url=item["Url"])
-    # Unknown marketplace: fall back to a Doorzo search for the item title.
-    return "https://www.doorzo.com/en/search?" + urllib.parse.urlencode({"keywords": item.get("Name", "")})
+    build = MARKETPLACES.get(item.get("Type"), (None, None))[1]
+    try:
+        if build:
+            return DOORZO + build(item)
+    except KeyError:
+        pass
+    # Unknown marketplace or missing field: fall back to a Doorzo search for the title.
+    return DOORZO + "/search?" + urllib.parse.urlencode({"keywords": item.get("Name", "")})
+
+
+def price_text(item):
+    if item.get("JPYPriceStr"):
+        return "¥" + item["JPYPriceStr"]
+    # Auctions have a current bid and sometimes a buy-now price instead.
+    parts = []
+    if item.get("BidJPYPriceStr"):
+        parts.append("bid ¥" + item["BidJPYPriceStr"])
+    if item.get("BuyNowPriceStr") and item.get("BuyNowPriceStr") != item.get("BidJPYPriceStr"):
+        parts.append("buy now ¥" + item["BuyNowPriceStr"])
+    return ", ".join(parts) or "price not shown"
+
+
+def title_matches(watch, item):
+    """Doorzo also returns loosely related items. With "title_must_include", keep
+    only items whose title contains at least one of those words (any case)."""
+    words = watch.get("title_must_include")
+    if not words:
+        return True
+    title = item.get("Name", "").lower()
+    return any(w.lower() in title for w in words)
 
 
 def keyword_label(watch):
@@ -105,11 +158,10 @@ def keyword_label(watch):
 
 
 def notify(topic, watch, item, dry_run):
-    label = SITE_BY_ITEM_TYPE.get(item.get("ItemType"), (None, "Doorzo"))[1]
     message = {
         "topic": topic,
         "title": item.get("Name", "New item")[:120],
-        "message": "¥%s · %s · keyword: %s" % (item.get("JPYPriceStr", "?"), label, keyword_label(watch)),
+        "message": "%s · %s · keyword: %s" % (price_text(item), marketplace_label(item), keyword_label(watch)),
         "click": item_link(item),
         "tags": ["jp"],
     }
@@ -128,21 +180,22 @@ def notify(topic, watch, item, dry_run):
 
 def check(watch, seen_ids, topic, dry_run):
     """Search one keyword, notify for new items, return the updated seen list."""
-    items = search(watch)
-    ids = [i["Asin"] for i in items if i.get("Asin")]
+    items = [i for i in search(watch) if item_id(i) and title_matches(watch, i)]
+    ids = [item_id(i) for i in items]
     if not seen_ids:
         # First run for this keyword: remember what is listed now, send nothing.
         print("  first run: recorded %d existing items, no alerts" % len(ids))
         return ids[:SEEN_LIMIT]
 
     seen = set(seen_ids)
-    new_items = [i for i in items if i.get("Asin") and i["Asin"] not in seen]
+    new_items = [i for i in items if item_id(i) not in seen]
     limit = watch.get("max_alerts_per_check", 3)
     for item in new_items[:limit]:
         notify(topic, watch, item, dry_run)
     print("  %d new, %d alerted" % (len(new_items), min(len(new_items), limit)))
-    # Newest first, so the most recent IDs survive the trim.
-    return (ids + [i for i in seen_ids if i not in set(ids)])[:SEEN_LIMIT]
+    # Current results first, so the most recent IDs survive the trim.
+    current = set(ids)
+    return (ids + [i for i in seen_ids if i not in current])[:SEEN_LIMIT]
 
 
 def main():
@@ -158,8 +211,9 @@ def main():
     seen = load_json(SEEN_PATH, {})
     failures = 0
     for watch in config["watches"]:
-        key = json.dumps([watch["keyword"], watch.get("sites"), watch.get("max_price"), watch.get("min_price")],
-                         ensure_ascii=False)
+        # Changing what a keyword searches starts it fresh (one silent first run).
+        key = json.dumps([watch["keyword"], watch.get("sites"), watch.get("category"),
+                          watch.get("max_price"), watch.get("min_price")], ensure_ascii=False)
         print("checking %s" % keyword_label(watch))
         try:
             seen[key] = check(watch, seen.get(key, []), topic, dry_run)

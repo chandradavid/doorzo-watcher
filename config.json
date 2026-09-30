@@ -11,24 +11,43 @@
     {
       "keyword": "ゼナック",
       "note": "Zenaq fishing rods",
-      "sites": [
-        "mercari"
+      "category": "1172",
+      "title_must_include": [
+        "ゼナック",
+        "ぜナック",
+        "ZENAQ"
+      ],
+      "max_alerts_per_check": 5
+    },
+    {
+      "keyword": "アトール",
+      "note": "Atoll lures, e.g. Bonger and Angelo",
+      "category": "1172",
+      "title_must_include": [
+        "アトール",
+        "ATOLL"
       ],
       "max_alerts_per_check": 5
     },
     {
       "keyword": "グッドベイト",
-      "note": "Good Bait lures (tuna and GT plugs)",
-      "sites": [
-        "mercari"
+      "note": "Good Bait lures, tuna and GT plugs",
+      "category": "1172",
+      "title_must_include": [
+        "グッドベイト",
+        "グットベイト",
+        "GOOD BAIT",
+        "GOODBAIT"
       ],
       "max_alerts_per_check": 5
     },
     {
       "keyword": "トランスセンデンス",
-      "note": "Transcendence rods (LateBloomings, Pulcra)",
-      "sites": [
-        "mercari"
+      "note": "Transcendence rods, LateBloomings and Pulcra",
+      "category": "1172",
+      "title_must_include": [
+        "トランスセンデンス",
+        "TRANSCENDENCE"
       ],
       "max_alerts_per_check": 5
     }
