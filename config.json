@@ -7,6 +7,30 @@
         "mercari"
       ],
       "max_alerts_per_check": 3
+    },
+    {
+      "keyword": "ゼナック",
+      "note": "Zenaq fishing rods",
+      "sites": [
+        "mercari"
+      ],
+      "max_alerts_per_check": 5
+    },
+    {
+      "keyword": "グッドベイト",
+      "note": "Good Bait lures (tuna and GT plugs)",
+      "sites": [
+        "mercari"
+      ],
+      "max_alerts_per_check": 5
+    },
+    {
+      "keyword": "トランスセンデンス",
+      "note": "Transcendence rods (LateBloomings, Pulcra)",
+      "sites": [
+        "mercari"
+      ],
+      "max_alerts_per_check": 5
     }
   ]
 }
