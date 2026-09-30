@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  actions: write
 
 # Never let two checks run at once, or they would both alert for the same item.
 concurrency:
@@ -41,11 +40,3 @@ jobs:
         with:
           path: seen.json
           key: seen-${{ github.run_id }}
-
-      # GitHub turns off schedules in public repositories after 60 days with
-      # no activity. Re-enabling the workflow on each run resets that timer.
-      - name: Keep schedule alive
-        if: always()
-        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/watch.yml/enable"
-        env:
-          GH_TOKEN: ${{ github.token }}
