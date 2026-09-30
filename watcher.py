@@ -97,12 +97,19 @@ def item_link(item):
     return "https://www.doorzo.com/en/search?" + urllib.parse.urlencode({"keywords": item.get("Name", "")})
 
 
+def keyword_label(watch):
+    """The keyword as shown to a person: "note" is a reminder only, never searched."""
+    if watch.get("note"):
+        return "%s (%s)" % (watch["keyword"], watch["note"])
+    return watch["keyword"]
+
+
 def notify(topic, watch, item, dry_run):
     label = SITE_BY_ITEM_TYPE.get(item.get("ItemType"), (None, "Doorzo"))[1]
     message = {
         "topic": topic,
         "title": item.get("Name", "New item")[:120],
-        "message": "¥%s · %s · keyword: %s" % (item.get("JPYPriceStr", "?"), label, watch["keyword"]),
+        "message": "¥%s · %s · keyword: %s" % (item.get("JPYPriceStr", "?"), label, keyword_label(watch)),
         "click": item_link(item),
         "tags": ["jp"],
     }
@@ -153,7 +160,7 @@ def main():
     for watch in config["watches"]:
         key = json.dumps([watch["keyword"], watch.get("sites"), watch.get("max_price"), watch.get("min_price")],
                          ensure_ascii=False)
-        print("checking %s" % watch["keyword"])
+        print("checking %s" % keyword_label(watch))
         try:
             seen[key] = check(watch, seen.get(key, []), topic, dry_run)
         except Exception as e:  # one broken keyword must not stop the others

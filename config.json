@@ -2,7 +2,10 @@
   "watches": [
     {
       "keyword": "ポケモンカード",
-      "sites": ["mercari"],
+      "note": "Pokémon cards, test",
+      "sites": [
+        "mercari"
+      ],
       "max_alerts_per_check": 3
     }
   ]
