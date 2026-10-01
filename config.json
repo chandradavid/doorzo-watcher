@@ -42,6 +42,20 @@
         "TRANSCENDENCE"
       ],
       "max_alerts_per_check": 5
+    },
+    {
+      "keyword": "シービーワン ライアン",
+      "note": "CB ONE Ryan 200 pencil lure, under AUD 100",
+      "category": "1172",
+      "title_must_include": [
+        "ライアン",
+        "RYAN"
+      ],
+      "title_must_also_include": [
+        "200"
+      ],
+      "max_price": 10900,
+      "max_alerts_per_check": 5
     }
   ]
 }

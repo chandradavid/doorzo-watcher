@@ -8,7 +8,11 @@ notification through [ntfy](https://ntfy.sh) for each new item.
   - `sites`: limit to some marketplaces, for example `["mercari"]`. Leave it out to search all of them.
   - `category`: a Doorzo category code, for example `"1172"` for Sports & Outdoors > Fishing.
   - `title_must_include`: alert only when the title contains one of these words.
-  - `max_price`, `min_price` and `max_alerts_per_check`.
+  - `title_must_also_include`: a second list, one of which must also be in the title
+    (for example a size such as `"200"`; numbers match only as whole numbers).
+  - `max_price` and `min_price` in yen, checked by the watcher against the listed
+    price or current auction bid. A listing whose price later drops into range alerts once.
+  - `max_alerts_per_check`.
 - The ntfy topic is the `NTFY_TOPIC` repository secret.
 - GitHub Actions runs the check every 5 minutes from 6 AM to midnight Japan time.
 - Run locally with `NTFY_TOPIC=<topic> python3 watcher.py` (`--dry-run` sends nothing).

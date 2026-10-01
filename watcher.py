@@ -11,6 +11,7 @@ Usage:
 """
 import json
 import os
+import re
 import sys
 import time
 import urllib.parse
@@ -140,14 +141,48 @@ def price_text(item):
     return ", ".join(parts) or "price not shown"
 
 
+def word_in_title(word, title):
+    """Case-insensitive match. A number such as "200" must stand alone, so
+    it matches "ライアン200" and "Ryan 200" but not "20000" or "2000"."""
+    word = word.lower()
+    if word.isdigit():
+        return re.search(r"(?<!\d)%s(?!\d)" % word, title) is not None
+    return word in title
+
+
 def title_matches(watch, item):
-    """Doorzo also returns loosely related items. With "title_must_include", keep
-    only items whose title contains at least one of those words (any case)."""
-    words = watch.get("title_must_include")
-    if not words:
-        return True
+    """Doorzo also returns loosely related items. "title_must_include" keeps an
+    item only if its title has at least one of those words; "title_must_also_include"
+    adds a second group that must also match (for example a size)."""
     title = item.get("Name", "").lower()
-    return any(w.lower() in title for w in words)
+    for group in ("title_must_include", "title_must_also_include"):
+        words = watch.get(group)
+        if words and not any(word_in_title(w, title) for w in words):
+            return False
+    return True
+
+
+def current_price(item):
+    """Price in yen as listed now: the fixed price, or an auction's current bid."""
+    for field in ("JPYPrice", "BidJPYPrice", "BuyNowPrice"):
+        try:
+            if item.get(field):
+                return int(item[field])
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def price_matches(watch, item):
+    """Doorzo ignores its own price filter for some marketplaces, so check here too."""
+    price = current_price(item)
+    if price is None:
+        return True  # price not shown: alert rather than miss it
+    if watch.get("max_price") and price > watch["max_price"]:
+        return False
+    if watch.get("min_price") and price < watch["min_price"]:
+        return False
+    return True
 
 
 def keyword_label(watch):
@@ -180,10 +215,13 @@ def notify(topic, watch, item, dry_run):
 
 def check(watch, seen_ids, topic, dry_run):
     """Search one keyword, notify for new items, return the updated seen list."""
-    items = [i for i in search(watch) if item_id(i) and title_matches(watch, i)]
+    # Items outside the price range are not remembered, so a listing whose
+    # price is later cut into the range still alerts once.
+    items = [i for i in search(watch) if item_id(i) and title_matches(watch, i) and price_matches(watch, i)]
     ids = [item_id(i) for i in items]
-    if not seen_ids:
+    if seen_ids is None:
         # First run for this keyword: remember what is listed now, send nothing.
+        # An empty list is not a first run: it means nothing matched last time.
         print("  first run: recorded %d existing items, no alerts" % len(ids))
         return ids[:SEEN_LIMIT]
 
@@ -216,7 +254,7 @@ def main():
                           watch.get("max_price"), watch.get("min_price")], ensure_ascii=False)
         print("checking %s" % keyword_label(watch))
         try:
-            seen[key] = check(watch, seen.get(key, []), topic, dry_run)
+            seen[key] = check(watch, seen.get(key), topic, dry_run)
         except Exception as e:  # one broken keyword must not stop the others
             failures += 1
             print("  failed: %s" % e)
