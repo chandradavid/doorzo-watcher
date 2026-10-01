@@ -21,7 +21,7 @@ notification through [ntfy](https://ntfy.sh) for each new item.
 
 Doorzo does not push inbox messages. If the `DOORZO_COOKIE` repository secret
 holds a signed-in Doorzo session, the watcher checks the unread counts on the
-profile icon about every 10 minutes and alerts when messages, notices or
+profile icon about every 15 minutes and alerts when messages, notices or
 support replies go up. Doorzo's login needs a reCAPTCHA, so the watcher never
 signs in by itself. When the session expires it sends one "Doorzo login
 expired" alert; sign in again in a browser and replace the secret. The cookie
