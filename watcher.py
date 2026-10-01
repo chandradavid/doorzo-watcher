@@ -202,6 +202,11 @@ def notify(topic, watch, item, dry_run):
     }
     if item.get("ImageUrl"):
         message["attach"] = item["ImageUrl"]
+    send(message, dry_run)
+
+
+def send(message, dry_run):
+    """Publish one notification through ntfy."""
     if dry_run:
         print("  would send:", json.dumps(message, ensure_ascii=False))
         return
@@ -243,6 +248,79 @@ def check(watch, seen_ids, topic, dry_run):
     current = set(ids)
     return (ids + [i for i in seen_ids if i not in current])[:SEEN_LIMIT]
 
+# ---------------------------------------------------------------------------
+# Doorzo inbox. Doorzo's login needs a reCAPTCHA, so the watcher never signs in
+# itself: it reuses a session the operator signed in to in a browser, stored as
+# the DOORZO_COOKIE secret. It asks for the same unread counts the website
+# shows on the profile icon, and alerts when one goes up.
+# ---------------------------------------------------------------------------
+INBOX_STATE_KEY = "__inbox__"
+# Signed-in requests are rarer than searches, to look like a person checking
+# now and then. Slightly under 10 minutes, because runs start every 2 minutes.
+INBOX_INTERVAL_SECONDS = 9 * 60 + 30
+INBOX_COUNTS = {
+    # count name: (what to call it in the alert, page that tapping it opens)
+    "message": ("message", DOORZO + "/personal/message"),
+    "notice": ("notice", DOORZO + "/personal/message"),
+    "work": ("support reply", DOORZO + "/workOrder"),
+}
+
+
+def inbox_counts(cookie):
+    """Unread counts for the signed-in account, or None when the session has expired."""
+    params = {"n": "Sig.Front.Front.GlobalHomeInfo", "from": "INTERNATIONAL", "isNew": "15", "language": "en"}
+    req = urllib.request.Request(
+        SEARCH_URL + "?" + urllib.parse.urlencode(params),
+        headers={"User-Agent": USER_AGENT, "Accept-Language": "en", "Cookie": cookie},
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        body = json.load(resp)
+    if body.get("code") != 200:
+        raise RuntimeError("Doorzo returned code %s" % body.get("code"))
+    data = body.get("data") or {}
+    user = data.get("user")
+    if not user:
+        return None  # Doorzo treats the request as signed out
+    by_type = user.get("messageCount") or {}
+    return {
+        "message": int(by_type.get("message") or 0),
+        "notice": int(by_type.get("notice") or 0),
+        "work": int(data.get("workUnreadNum") or 0),
+    }
+
+
+def check_inbox(state, topic, dry_run, now):
+    """Alert on new unread Doorzo messages. Returns the updated state.
+    Logs only whether the session works, because the repository's logs are public."""
+    state = dict(state or {})
+    cookie = os.environ.get("DOORZO_COOKIE", "").strip()
+    if not cookie:
+        return state  # inbox alerts not set up
+    if now - state.get("last_check", 0) < INBOX_INTERVAL_SECONDS:
+        return state
+    state["last_check"] = now
+    counts = inbox_counts(cookie)
+    if counts is None:
+        print("inbox: signed out")
+        if not state.get("expired_alerted"):
+            send({"topic": topic, "title": "Doorzo login expired",
+                  "message": "Inbox alerts are paused. Sign in to doorzo.com again and update the DOORZO_COOKIE secret.",
+                  "click": "https://github.com/chandradavid/doorzo-watcher/settings/secrets/actions",
+                  "tags": ["warning"]}, dry_run)
+            state["expired_alerted"] = True
+        return state
+    print("inbox: signed in")
+    state["expired_alerted"] = False
+    before = state.get("counts")
+    if before is not None:  # the first check only records the counts
+        for name, (label, page) in INBOX_COUNTS.items():
+            added = counts[name] - before.get(name, 0)
+            if added > 0:
+                send({"topic": topic, "title": "Doorzo: %d new %s%s" % (added, label, "" if added == 1 else "s"),
+                      "message": "Tap to open your Doorzo inbox.", "click": page, "tags": ["envelope"]}, dry_run)
+    state["counts"] = counts
+    return state
+
 
 def main():
     dry_run = "--dry-run" in sys.argv
@@ -267,6 +345,10 @@ def main():
             failures += 1
             print("  failed: %s" % e)
         time.sleep(1)  # be gentle with Doorzo between keywords
+    try:
+        seen[INBOX_STATE_KEY] = check_inbox(seen.get(INBOX_STATE_KEY), topic, dry_run, time.time())
+    except Exception as e:  # the inbox must never stop item alerts
+        print("inbox: check failed (%s)" % type(e).__name__)
     if not dry_run:
         save_json(SEEN_PATH, seen)
     sys.exit(1 if failures == len(config["watches"]) else 0)

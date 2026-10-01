@@ -16,3 +16,14 @@ notification through [ntfy](https://ntfy.sh) for each new item.
 - The ntfy topic is the `NTFY_TOPIC` repository secret.
 - GitHub Actions runs the check every 5 minutes from 6 AM to midnight Japan time.
 - Run locally with `NTFY_TOPIC=<topic> python3 watcher.py` (`--dry-run` sends nothing).
+
+## Inbox alerts (optional)
+
+Doorzo does not push inbox messages. If the `DOORZO_COOKIE` repository secret
+holds a signed-in Doorzo session, the watcher checks the unread counts on the
+profile icon about every 10 minutes and alerts when messages, notices or
+support replies go up. Doorzo's login needs a reCAPTCHA, so the watcher never
+signs in by itself. When the session expires it sends one "Doorzo login
+expired" alert; sign in again in a browser and replace the secret. The cookie
+gives full access to the account, so keep it only in the GitHub secret.
+

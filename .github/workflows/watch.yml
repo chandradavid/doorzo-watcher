@@ -34,6 +34,8 @@ jobs:
         run: python3 watcher.py
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          # Optional: a signed-in Doorzo session for inbox alerts (see README).
+          DOORZO_COOKIE: ${{ secrets.DOORZO_COOKIE }}
 
       - uses: actions/cache/save@v4
         if: always() && hashFiles('seen.json') != ''
