@@ -14,7 +14,8 @@ notification through [ntfy](https://ntfy.sh) for each new item.
     price or current auction bid. A listing whose price later drops into range alerts once.
   - `max_alerts_per_check`.
 - The ntfy topic is the `NTFY_TOPIC` repository secret.
-- GitHub Actions runs the check every 5 minutes from 6 AM to midnight Japan time.
+- cron-job.org starts the check every 2 minutes, all day, through the workflow_dispatch API.
+  GitHub's own schedule (every 5 minutes) is only a backup, because it often runs late.
 - Run locally with `NTFY_TOPIC=<topic> python3 watcher.py` (`--dry-run` sends nothing).
 
 ## Inbox alerts (optional)

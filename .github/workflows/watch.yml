@@ -2,9 +2,10 @@ name: watch
 
 on:
   schedule:
-    # Every 5 minutes from 6:00 AM to 11:59 PM Japan time (UTC+9).
-    # GitHub schedules run in UTC and often start a few minutes late.
-    - cron: "*/5 21-23,0-14 * * *"
+    # Backup timer: every 5 minutes, all day. GitHub often starts these late or
+    # skips them; the main trigger is cron-job.org calling workflow_dispatch
+    # every 2 minutes.
+    - cron: "*/5 * * * *"
   workflow_dispatch:
     inputs:
       inbox_test:
