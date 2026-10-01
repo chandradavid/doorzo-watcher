@@ -227,10 +227,18 @@ def check(watch, seen_ids, topic, dry_run):
 
     seen = set(seen_ids)
     new_items = [i for i in items if item_id(i) not in seen]
+    # Shops often list one item on several marketplaces with the same title and
+    # price. Alert once per title and price; the copies are still remembered.
+    unique, copies = [], set()
+    for item in new_items:
+        fingerprint = (item.get("Name", "").strip(), current_price(item))
+        if fingerprint not in copies:
+            copies.add(fingerprint)
+            unique.append(item)
     limit = watch.get("max_alerts_per_check", 3)
-    for item in new_items[:limit]:
+    for item in unique[:limit]:
         notify(topic, watch, item, dry_run)
-    print("  %d new, %d alerted" % (len(new_items), min(len(new_items), limit)))
+    print("  %d new, %d alerted" % (len(new_items), min(len(unique), limit)))
     # Current results first, so the most recent IDs survive the trim.
     current = set(ids)
     return (ids + [i for i in seen_ids if i not in current])[:SEEN_LIMIT]

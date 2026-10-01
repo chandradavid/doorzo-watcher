@@ -45,7 +45,7 @@
     },
     {
       "keyword": "シービーワン ライアン",
-      "note": "CB ONE Ryan 200 pencil lure, under AUD 100",
+      "note": "CB ONE Ryan 200 pencil lure, under AUD 120",
       "category": "1172",
       "title_must_include": [
         "ライアン",
@@ -54,7 +54,22 @@
       "title_must_also_include": [
         "200"
       ],
-      "max_price": 10900,
+      "max_price": 13100,
+      "max_alerts_per_check": 5
+    },
+    {
+      "keyword": "シービーワン ゾロ",
+      "note": "CB ONE Zorro 220 or 240 pencil lure, under AUD 120",
+      "category": "1172",
+      "title_must_include": [
+        "ゾロ",
+        "ZORRO"
+      ],
+      "title_must_also_include": [
+        "220",
+        "240"
+      ],
+      "max_price": 13100,
       "max_alerts_per_check": 5
     }
   ]
