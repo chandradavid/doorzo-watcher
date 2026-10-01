@@ -9,6 +9,7 @@ Usage:
   python3 watcher.py            # normal check
   python3 watcher.py --dry-run  # print what would be sent, send nothing
 """
+import html
 import json
 import os
 import re
@@ -289,6 +290,54 @@ def inbox_counts(cookie):
     }
 
 
+def inbox_messages(cookie):
+    """The first page of "My Messages", newest first. This only reads; Doorzo
+    marks a message read through a separate call the watcher never makes."""
+    params = {"n": "Sig.Front.User.AppUser.GetMessageWeb", "from": "INTERNATIONAL", "isNew": "15",
+              "language": "en", "ver": "1"}
+    req = urllib.request.Request(
+        SEARCH_URL + "?" + urllib.parse.urlencode(params),
+        data=json.dumps({"page": 1}).encode("utf-8"),
+        headers={"User-Agent": USER_AGENT, "Accept-Language": "en", "Cookie": cookie,
+                 "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        body = json.load(resp)
+    if body.get("code") != 200:
+        raise RuntimeError("Doorzo returned code %s" % body.get("code"))
+    return (body.get("data") or {}).get("Data") or []
+
+
+def plain_text(content, limit=300):
+    """Message bodies are HTML; turn them into short plain text for an alert."""
+    text = re.sub(r"<br\s*/?>|</p>", "\n", content or "", flags=re.I)
+    text = html.unescape(re.sub(r"<[^>]+>", "", text))
+    text = re.sub(r"[ \t]+", " ", re.sub(r"\n\s*\n+", "\n", text)).strip()
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def message_alert(topic, msg, prefix=""):
+    alert = {"topic": topic,
+             "title": (prefix + (msg.get("title") or "New Doorzo message"))[:120],
+             "message": plain_text(msg.get("content")) or "Tap to open your Doorzo inbox.",
+             "click": DOORZO + "/personal/message", "tags": ["envelope"]}
+    if msg.get("imageList"):
+        alert["attach"] = msg["imageList"][0]
+    return alert
+
+
+def inbox_test(topic, dry_run, count=3):
+    """Send the latest messages once, so the operator can see inbox alerts work."""
+    cookie = os.environ.get("DOORZO_COOKIE", "").strip()
+    if not cookie:
+        print("inbox test: DOORZO_COOKIE is not set")
+        return
+    messages = inbox_messages(cookie)[:count]
+    for msg in reversed(messages):  # oldest first, so the newest ends up on top
+        send(message_alert(topic, msg, prefix="TEST: "), dry_run)
+    print("inbox test: sent %d" % len(messages))
+
+
 def check_inbox(state, topic, dry_run, now):
     """Alert on new unread Doorzo messages. Returns the updated state.
     Logs only whether the session works, because the repository's logs are public."""
@@ -315,9 +364,20 @@ def check_inbox(state, topic, dry_run, now):
     if before is not None:  # the first check only records the counts
         for name, (label, page) in INBOX_COUNTS.items():
             added = counts[name] - before.get(name, 0)
-            if added > 0:
-                send({"topic": topic, "title": "Doorzo: %d new %s%s" % (added, label, "" if added == 1 else "s"),
-                      "message": "Tap to open your Doorzo inbox.", "click": page, "tags": ["envelope"]}, dry_run)
+            if added <= 0:
+                continue
+            if name == "message":
+                # Show the new messages themselves (up to 3), falling back to a count.
+                try:
+                    unread = [m for m in inbox_messages(cookie) if str(m.get("hasRead")) != "1"][:min(added, 3)]
+                except Exception:
+                    unread = []
+                if unread:
+                    for msg in reversed(unread):
+                        send(message_alert(topic, msg), dry_run)
+                    continue
+            send({"topic": topic, "title": "Doorzo: %d new %s%s" % (added, label, "" if added == 1 else "s"),
+                  "message": "Tap to open your Doorzo inbox.", "click": page, "tags": ["envelope"]}, dry_run)
     state["counts"] = counts
     return state
 
@@ -332,6 +392,11 @@ def main():
     topic = os.environ.get("NTFY_TOPIC") or config.get("ntfy_topic")
     if not topic:
         sys.exit("no ntfy topic: set NTFY_TOPIC or ntfy_topic in config.json")
+    if os.environ.get("INBOX_TEST") == "true":
+        try:
+            inbox_test(topic, dry_run)
+        except Exception as e:
+            print("inbox test: failed (%s)" % type(e).__name__)
     seen = load_json(SEEN_PATH, {})
     failures = 0
     for watch in config["watches"]:
