@@ -257,8 +257,8 @@ def check(watch, seen_ids, topic, dry_run):
 # ---------------------------------------------------------------------------
 INBOX_STATE_KEY = "__inbox__"
 # Signed-in requests are rarer than searches, to look like a person checking
-# now and then. Slightly under 15 minutes, because runs start every 2 minutes.
-INBOX_INTERVAL_SECONDS = 14 * 60 + 30
+# now and then. Slightly under 30 minutes, because runs start every 2 minutes.
+INBOX_INTERVAL_SECONDS = 29 * 60 + 30
 INBOX_COUNTS = {
     # count name: (what to call it in the alert, page that tapping it opens)
     "message": ("message", DOORZO + "/personal/message"),
