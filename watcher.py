@@ -199,7 +199,7 @@ def notify(topic, watch, item, dry_run):
         "title": item.get("Name", "New item")[:120],
         "message": "%s · %s · keyword: %s" % (price_text(item), marketplace_label(item), keyword_label(watch)),
         "click": item_link(item),
-        "tags": ["jp"],
+        "tags": ["fishing_pole_and_fish"],  # shown as 🎣 in front of the title
     }
     if item.get("ImageUrl"):
         message["attach"] = item["ImageUrl"]
@@ -320,7 +320,7 @@ def message_alert(topic, msg, prefix=""):
     alert = {"topic": topic,
              "title": (prefix + (msg.get("title") or "New Doorzo message"))[:120],
              "message": plain_text(msg.get("content")) or "Tap to open your Doorzo inbox.",
-             "click": DOORZO + "/personal/message", "tags": ["envelope"]}
+             "click": DOORZO + "/personal/message", "tags": ["envelope_with_arrow"]}  # 📩
     if msg.get("imageList"):
         alert["attach"] = msg["imageList"][0]
     return alert
@@ -377,7 +377,7 @@ def check_inbox(state, topic, dry_run, now):
                         send(message_alert(topic, msg), dry_run)
                     continue
             send({"topic": topic, "title": "Doorzo: %d new %s%s" % (added, label, "" if added == 1 else "s"),
-                  "message": "Tap to open your Doorzo inbox.", "click": page, "tags": ["envelope"]}, dry_run)
+                  "message": "Tap to open your Doorzo inbox.", "click": page, "tags": ["envelope_with_arrow"]}, dry_run)
     state["counts"] = counts
     return state
 
@@ -392,9 +392,12 @@ def main():
     topic = os.environ.get("NTFY_TOPIC") or config.get("ntfy_topic")
     if not topic:
         sys.exit("no ntfy topic: set NTFY_TOPIC or ntfy_topic in config.json")
+    # Inbox alerts go to their own topic, so the ntfy app shows them as a
+    # separate subscription with its own sound and mute settings.
+    inbox_topic = os.environ.get("NTFY_INBOX_TOPIC") or topic + "-inbox"
     if os.environ.get("INBOX_TEST") == "true":
         try:
-            inbox_test(topic, dry_run)
+            inbox_test(inbox_topic, dry_run)
         except Exception as e:
             print("inbox test: failed (%s)" % type(e).__name__)
     seen = load_json(SEEN_PATH, {})
@@ -411,7 +414,7 @@ def main():
             print("  failed: %s" % e)
         time.sleep(1)  # be gentle with Doorzo between keywords
     try:
-        seen[INBOX_STATE_KEY] = check_inbox(seen.get(INBOX_STATE_KEY), topic, dry_run, time.time())
+        seen[INBOX_STATE_KEY] = check_inbox(seen.get(INBOX_STATE_KEY), inbox_topic, dry_run, time.time())
     except Exception as e:  # the inbox must never stop item alerts
         print("inbox: check failed (%s)" % type(e).__name__)
     if not dry_run:
