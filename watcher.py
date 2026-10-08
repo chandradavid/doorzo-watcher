@@ -382,6 +382,80 @@ def check_inbox(state, topic, dry_run, now):
     return state
 
 
+# ---------------------------------------------------------------------------
+# Favourite auction reminders (optional). Reads the Yahoo Auctions items the
+# operator saved as favourites on Doorzo, with the same DOORZO_COOKIE session
+# as the inbox alerts.
+# ---------------------------------------------------------------------------
+AUCTION_PAGE_LIMIT = 5  # Doorzo returns 10 favourites per page
+
+
+def favourite_auctions(cookie):
+    """The signed-in account's favourite Yahoo auctions that have not ended yet."""
+    items = []
+    for page in range(1, AUCTION_PAGE_LIMIT + 1):
+        params = {"n": "Sig.Front.User.AppYahooAcOrder.CollectionList", "from": "INTERNATIONAL", "isNew": "15",
+                  "language": "en"}
+        req = urllib.request.Request(
+            SEARCH_URL + "?" + urllib.parse.urlencode(params),
+            # "进行中" (in progress) is the filter Doorzo's own favourites page uses.
+            data=json.dumps({"status": "进行中", "page": page}, ensure_ascii=False).encode("utf-8"),
+            headers={"User-Agent": USER_AGENT, "Accept-Language": "en", "Cookie": cookie,
+                     "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = json.load(resp)
+        if body.get("code") != 200:
+            raise RuntimeError("Doorzo returned code %s" % body.get("code"))
+        data = body.get("data") or {}
+        batch = data.get("Data") or []
+        items.extend(batch)
+        if not batch or len(items) >= int(data.get("TotalItem") or 0):
+            break
+        time.sleep(1)
+    return items
+
+
+def auction_link(item):
+    if item.get("DetailUrl"):
+        return DOORZO + "/mall/yahoo/detail/" + quote(item["DetailUrl"])
+    return DOORZO + "/personal/collect"
+
+
+def auction_price_text(item):
+    price = item.get("Price") or {}
+    parts = []
+    if price.get("BidPrice"):
+        parts.append("bid ¥{:,}".format(int(float(price["BidPrice"]))))
+    if price.get("BuyNowPrice"):
+        parts.append("buy now ¥{:,}".format(int(float(price["BuyNowPrice"]))))
+    return ", ".join(parts) or "price not shown"
+
+
+def auction_test(topic, dry_run, count=3):
+    """Send a few favourite auctions once, with Doorzo's raw end-time text and
+    field names, so the operator sees the channel work and the format can be read."""
+    cookie = os.environ.get("DOORZO_COOKIE", "").strip()
+    if not cookie:
+        print("auction test: DOORZO_COOKIE is not set")
+        return
+    items = favourite_auctions(cookie)
+    for item in items[:count]:
+        alert = {"topic": topic, "title": ("TEST: " + (item.get("Name") or "Favourite auction"))[:120],
+                 "message": "%s\nend time from Doorzo: %s\nfields: %s" % (
+                     auction_price_text(item), item.get("BidDeadlineStr"), ", ".join(sorted(item))),
+                 "click": auction_link(item), "tags": ["alarm_clock"]}  # ⏰
+        if item.get("ImageUrl"):
+            alert["attach"] = item["ImageUrl"]
+        send(alert, dry_run)
+    if not items:
+        send({"topic": topic, "title": "TEST: no running favourite auctions",
+              "message": "Doorzo returned no favourite Yahoo auctions that are still running.",
+              "click": DOORZO + "/personal/collect", "tags": ["alarm_clock"]}, dry_run)
+    # Only a count: the repository's logs are public.
+    print("auction test: found %d, sent %d" % (len(items), min(len(items), count) or 1))
+
+
 def main():
     dry_run = "--dry-run" in sys.argv
     config = load_json(CONFIG_PATH, None)
@@ -400,6 +474,13 @@ def main():
             inbox_test(inbox_topic, dry_run)
         except Exception as e:
             print("inbox test: failed (%s)" % type(e).__name__)
+    # Favourite auction reminders also get their own topic.
+    auction_topic = os.environ.get("NTFY_AUCTION_TOPIC") or topic + "-auction"
+    if os.environ.get("AUCTION_TEST") == "true":
+        try:
+            auction_test(auction_topic, dry_run)
+        except Exception as e:
+            print("auction test: failed (%s)" % type(e).__name__)
     seen = load_json(SEEN_PATH, {})
     failures = 0
     for watch in config["watches"]:

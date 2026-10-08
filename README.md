@@ -29,3 +29,12 @@ signs in by itself. When the session expires it sends one "Doorzo login
 expired" alert; sign in again in a browser and replace the secret. The cookie
 gives full access to the account, so keep it only in the GitHub secret.
 
+## Favourite auction reminders (in progress)
+
+With the same `DOORZO_COOKIE` session, the watcher reads the Yahoo Auctions
+items saved as favourites on Doorzo. Reminders go to their own ntfy topic, the
+main topic name plus `-auction`. To test it, open Actions, choose "watch",
+press "Run workflow" and tick the auction test: up to 3 favourite auctions
+arrive on that topic with Doorzo's end-time text. Reminders 1 day and 1 hour
+before an auction ends come next.
+

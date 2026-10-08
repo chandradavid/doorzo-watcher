@@ -12,6 +12,10 @@ on:
         description: "Also send my 3 latest Doorzo messages, to test inbox alerts"
         type: boolean
         default: false
+      auction_test:
+        description: "Also send up to 3 of my favourite Yahoo auctions, to test auction reminders"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -43,6 +47,7 @@ jobs:
           # Optional: a signed-in Doorzo session for inbox alerts (see README).
           DOORZO_COOKIE: ${{ secrets.DOORZO_COOKIE }}
           INBOX_TEST: ${{ inputs.inbox_test }}
+          AUCTION_TEST: ${{ inputs.auction_test }}
 
       - uses: actions/cache/save@v4
         if: always() && hashFiles('seen.json') != ''
