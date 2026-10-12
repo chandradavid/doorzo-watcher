@@ -9,6 +9,7 @@ Usage:
   python3 watcher.py            # normal check
   python3 watcher.py --dry-run  # print what would be sent, send nothing
 """
+import datetime
 import html
 import json
 import os
@@ -432,6 +433,92 @@ def auction_price_text(item):
     return ", ".join(parts) or "price not shown"
 
 
+AUCTION_STATE_KEY = "__auctions__"
+# Each favourite gets at most two reminders: one when less than a day is left,
+# and one when less than an hour is left.
+AUCTION_REMINDERS = (("hour", 60 * 60), ("day", 24 * 60 * 60))
+JAPAN = datetime.timezone(datetime.timedelta(hours=9))  # Japan has no daylight saving
+try:
+    from zoneinfo import ZoneInfo
+    SHOWN_ZONE, SHOWN_ZONE_NAME = ZoneInfo("Australia/Sydney"), "Sydney"
+except Exception:  # no time zone data: show Japan time instead
+    SHOWN_ZONE, SHOWN_ZONE_NAME = JAPAN, "Japan"
+COUNTDOWN_UNITS = (
+    (r"(\d+)\s*(?:d|days?|日)", 24 * 60 * 60),
+    (r"(\d+)\s*(?:h|hrs?|hours?|小时|時間)", 60 * 60),
+    (r"(\d+)\s*(?:m|mins?|minutes?|分钟|分)(?![a-z])", 60),
+    (r"(\d+)\s*(?:s|secs?|seconds?|秒)(?![a-z])", 1),
+)
+
+
+def auction_end(text, now):
+    """When an auction ends, as a Unix time, from Doorzo's end-time text: a
+    countdown such as "10h 33m" or a Japan-time date. None if unreadable."""
+    text = (text or "").strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M"):
+        try:
+            return datetime.datetime.strptime(text, fmt).replace(tzinfo=JAPAN).timestamp()
+        except ValueError:
+            pass
+    seconds, found = 0, False
+    for pattern, size in COUNTDOWN_UNITS:
+        match = re.search(pattern, text, flags=re.I)
+        if match:
+            seconds, found = seconds + int(match.group(1)) * size, True
+    return now + seconds if found else None
+
+
+def time_left_text(seconds):
+    minutes = max(int(seconds // 60), 1)
+    hours, minutes = divmod(minutes, 60)
+    return "%dh %02dm" % (hours, minutes) if hours else "%d min" % minutes
+
+
+def check_auctions(state, topic, dry_run, now, fetch):
+    """Remind about favourite auctions 1 day and 1 hour before they end.
+    Favourites are fetched only when fetch is true (the hourly signed-in visit);
+    every other run compares the saved end times with the clock, with no request.
+    Logs only counts, because the repository's logs are public."""
+    state = dict(state or {})
+    items = dict(state.get("items") or {})
+    cookie = os.environ.get("DOORZO_COOKIE", "").strip()
+    if fetch and cookie:
+        fresh, unreadable = {}, 0
+        for item in favourite_auctions(cookie):
+            end = auction_end(item.get("BidDeadlineStr"), now)
+            key = str(item.get("Asin") or item.get("DetailUrl") or "")
+            if not key:
+                continue
+            if end is None:
+                unreadable += 1
+                continue
+            sent = (items.get(key) or {}).get("sent") or []
+            fresh[key] = {"end": end, "sent": sent, "name": item.get("Name") or "Favourite auction",
+                          "price": auction_price_text(item), "link": auction_link(item),
+                          "image": item.get("ImageUrl")}
+        items = fresh  # an auction removed from favourites gets no more reminders
+        print("auctions: %d favourites%s" % (len(items), ", %d end times unreadable" % unreadable if unreadable else ""))
+    for key, item in list(items.items()):
+        left = item["end"] - now
+        if left <= 0:
+            del items[key]
+            continue
+        due = [name for name, limit in AUCTION_REMINDERS if left <= limit and name not in item["sent"]]
+        if not due:
+            continue
+        ends_at = datetime.datetime.fromtimestamp(item["end"], SHOWN_ZONE).strftime("%a %H:%M")
+        alert = {"topic": topic, "title": ("Ends in %s: %s" % (time_left_text(left), item["name"]))[:120],
+                 "message": "%s · ends %s %s time. Tap to bid." % (item["price"], ends_at, SHOWN_ZONE_NAME),
+                 "click": item["link"], "tags": ["alarm_clock"]}  # ⏰
+        if item.get("image"):
+            alert["attach"] = item["image"]
+        send(alert, dry_run)
+        # The 1-hour reminder also covers the 1-day one, so a late favourite gets one alert.
+        item["sent"] = sorted(set(item["sent"]) | {name for name, limit in AUCTION_REMINDERS if left <= limit})
+    state["items"] = items
+    return state
+
+
 def auction_test(topic, dry_run, count=3):
     """Send a few favourite auctions once, with Doorzo's raw end-time text and
     field names, so the operator sees the channel work and the format can be read."""
@@ -494,10 +581,19 @@ def main():
             failures += 1
             print("  failed: %s" % e)
         time.sleep(1)  # be gentle with Doorzo between keywords
+    now = time.time()
+    last_visit = (seen.get(INBOX_STATE_KEY) or {}).get("last_check", 0)
     try:
-        seen[INBOX_STATE_KEY] = check_inbox(seen.get(INBOX_STATE_KEY), inbox_topic, dry_run, time.time())
+        seen[INBOX_STATE_KEY] = check_inbox(seen.get(INBOX_STATE_KEY), inbox_topic, dry_run, now)
     except Exception as e:  # the inbox must never stop item alerts
         print("inbox: check failed (%s)" % type(e).__name__)
+    # Favourites are fetched in the same hourly signed-in visit as the inbox,
+    # so Doorzo sees one visit an hour, not two.
+    visited = (seen.get(INBOX_STATE_KEY) or {}).get("last_check", 0) != last_visit
+    try:
+        seen[AUCTION_STATE_KEY] = check_auctions(seen.get(AUCTION_STATE_KEY), auction_topic, dry_run, now, visited)
+    except Exception as e:  # reminders must never stop item alerts
+        print("auctions: check failed (%s)" % type(e).__name__)
     if not dry_run:
         save_json(SEEN_PATH, seen)
     sys.exit(1 if failures == len(config["watches"]) else 0)
