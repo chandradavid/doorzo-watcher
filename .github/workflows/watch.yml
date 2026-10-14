@@ -13,7 +13,7 @@ on:
         type: boolean
         default: false
       auction_test:
-        description: "Also send up to 3 of my favourite Yahoo auctions, to test auction reminders"
+        description: "Also send up to 3 favourite Yahoo auctions and 3 active bids, to test auction alerts"
         type: boolean
         default: false
 

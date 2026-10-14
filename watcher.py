@@ -391,16 +391,14 @@ def check_inbox(state, topic, dry_run, now):
 AUCTION_PAGE_LIMIT = 5  # Doorzo returns 10 favourites per page
 
 
-def favourite_auctions(cookie):
-    """The signed-in account's favourite Yahoo auctions that have not ended yet."""
+def signed_in_list(cookie, name, filters):
+    """Every page of one of Doorzo's signed-in Yahoo Auctions lists (10 items a page)."""
     items = []
     for page in range(1, AUCTION_PAGE_LIMIT + 1):
-        params = {"n": "Sig.Front.User.AppYahooAcOrder.CollectionList", "from": "INTERNATIONAL", "isNew": "15",
-                  "language": "en"}
+        params = {"n": name, "from": "INTERNATIONAL", "isNew": "15", "language": "en"}
         req = urllib.request.Request(
             SEARCH_URL + "?" + urllib.parse.urlencode(params),
-            # "进行中" (in progress) is the filter Doorzo's own favourites page uses.
-            data=json.dumps({"status": "进行中", "page": page}, ensure_ascii=False).encode("utf-8"),
+            data=json.dumps(dict(filters, page=page), ensure_ascii=False).encode("utf-8"),
             headers={"User-Agent": USER_AGENT, "Accept-Language": "en", "Cookie": cookie,
                      "Content-Type": "application/json"},
         )
@@ -415,6 +413,12 @@ def favourite_auctions(cookie):
             break
         time.sleep(1)
     return items
+
+
+def favourite_auctions(cookie):
+    """The signed-in account's favourite Yahoo auctions that have not ended yet."""
+    # "进行中" (in progress) is the filter Doorzo's own favourites page uses.
+    return signed_in_list(cookie, "Sig.Front.User.AppYahooAcOrder.CollectionList", {"status": "进行中"})
 
 
 def auction_link(item):
@@ -519,6 +523,77 @@ def check_auctions(state, topic, dry_run, now, fetch):
     return state
 
 
+# ---------------------------------------------------------------------------
+# Outbid alerts (optional). Reads the operator's active Yahoo Auctions bids
+# with the same DOORZO_COOKIE session, and alerts when a bid that was leading
+# has been outbid.
+# ---------------------------------------------------------------------------
+BIDS_STATE_KEY = "__bids__"
+# Doorzo's "Status" values, the same ones its own bidding page compares against.
+BID_LEADING = "竞拍中"     # bidding, and the operator's bid is the highest
+BID_OUTBID = "价格被超过"  # someone has bid more
+# Bids are read in the hourly signed-in visit. When a leading bid ends within
+# an hour, they are also read every 10 minutes, with a short visit of their own.
+BIDS_ENDGAME_SECONDS = 60 * 60
+BIDS_ENDGAME_INTERVAL_SECONDS = 10 * 60 - 30
+
+
+def active_bids(cookie):
+    """The signed-in account's Yahoo auctions it is bidding on, leading or not."""
+    return signed_in_list(cookie, "Sig.Front.User.AppYahooAcOrder.List", {"status": BID_LEADING, "sort": ""})
+
+
+def bid_link(item):
+    if item.get("Url"):
+        return DOORZO + "/mall/yahoo/detail/" + quote(item["Url"])
+    return DOORZO + "/personal/yahoo"
+
+
+def bids_due(state, now):
+    """True when a leading bid ends within the hour and the last read was 10 minutes ago."""
+    state = state or {}
+    if now - state.get("last_check", 0) < BIDS_ENDGAME_INTERVAL_SECONDS:
+        return False
+    return any(b["status"] == BID_LEADING and 0 < b["end"] - now <= BIDS_ENDGAME_SECONDS
+               for b in (state.get("items") or {}).values())
+
+
+def check_bids(state, topic, dry_run, now):
+    """Read the active bids once and alert for each one that went from leading to
+    outbid since the last read. The first read only records. Logs only counts."""
+    state = dict(state or {})
+    cookie = os.environ.get("DOORZO_COOKIE", "").strip()
+    if not cookie:
+        return state
+    before = state.get("items")
+    state["last_check"] = now
+    items = {}
+    for item in active_bids(cookie):
+        key = str(item.get("Asin") or item.get("Url") or "")
+        if not key:
+            continue
+        end = auction_end(item.get("BidDeadlineStr"), now)
+        if end is None:  # keep the last known end time, so the 10-minute checks still work
+            end = ((before or {}).get(key) or {}).get("end", 0)
+        items[key] = {"status": item.get("Status") or "", "end": end}
+        was = ((before or {}).get(key) or {}).get("status")
+        if before is not None and was == BID_LEADING and items[key]["status"] == BID_OUTBID:
+            left = end - now
+            when = ("%s left · ends %s %s time" % (
+                time_left_text(left), datetime.datetime.fromtimestamp(end, SHOWN_ZONE).strftime("%a %H:%M"),
+                SHOWN_ZONE_NAME)) if left > 0 else "time left not shown"
+            alert = {"topic": topic, "title": ("Outbid: %s" % (item.get("Name") or "Yahoo auction"))[:120],
+                     "message": "Your bid ¥%s · %s. Tap to bid again." % (item.get("JPYPriceStr") or "?", when),
+                     "click": bid_link(item), "tags": ["warning"]}  # ⚠️
+            if item.get("ImageUrl"):
+                alert["attach"] = item["ImageUrl"]
+            send(alert, dry_run)
+    state["items"] = items  # ended or won bids drop out of Doorzo's list, and out of here
+    outbid = sum(1 for b in items.values() if b["status"] == BID_OUTBID)
+    print("bids: %d active, %d outbid" % (len(items), outbid))
+    return state
+
+
 def auction_test(topic, dry_run, count=3):
     """Send a few favourite auctions once, with Doorzo's raw end-time text and
     field names, so the operator sees the channel work and the format can be read."""
@@ -541,6 +616,17 @@ def auction_test(topic, dry_run, count=3):
               "click": DOORZO + "/personal/collect", "tags": ["alarm_clock"]}, dry_run)
     # Only a count: the repository's logs are public.
     print("auction test: found %d, sent %d" % (len(items), min(len(items), count) or 1))
+    bids = active_bids(cookie)
+    for item in bids[:count]:
+        alert = {"topic": topic, "title": ("TEST bid: " + (item.get("Name") or "Yahoo auction"))[:120],
+                 "message": "status from Doorzo: %s (%s)\nyour bid ¥%s · end time from Doorzo: %s" % (
+                     item.get("Status"), item.get("SubStatusStr"), item.get("JPYPriceStr"),
+                     item.get("BidDeadlineStr")),
+                 "click": bid_link(item), "tags": ["warning"]}
+        if item.get("ImageUrl"):
+            alert["attach"] = item["ImageUrl"]
+        send(alert, dry_run)
+    print("auction test: %d active bids" % len(bids))
 
 
 def main():
@@ -594,6 +680,11 @@ def main():
         seen[AUCTION_STATE_KEY] = check_auctions(seen.get(AUCTION_STATE_KEY), auction_topic, dry_run, now, visited)
     except Exception as e:  # reminders must never stop item alerts
         print("auctions: check failed (%s)" % type(e).__name__)
+    if visited or bids_due(seen.get(BIDS_STATE_KEY), now):
+        try:
+            seen[BIDS_STATE_KEY] = check_bids(seen.get(BIDS_STATE_KEY), auction_topic, dry_run, now)
+        except Exception as e:  # outbid alerts must never stop item alerts
+            print("bids: check failed (%s)" % type(e).__name__)
     if not dry_run:
         save_json(SEEN_PATH, seen)
     sys.exit(1 if failures == len(config["watches"]) else 0)

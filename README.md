@@ -39,7 +39,14 @@ the 1-hour reminder arrives 58 to 60 minutes before the end without any extra
 request to Doorzo. A favourite added late gets one reminder showing the real
 time left; one added less than an hour before the end can be missed.
 Reminders go to their own ntfy topic, the main topic name plus `-auction`.
+
+The same visit also reads the auctions you are bidding on. When a bid that
+was the highest has been outbid, an "Outbid" alert goes to the same topic.
+When a leading bid ends within an hour, bids are also read every 10 minutes,
+so an outbid in the last 10 minutes can still arrive late. The first read only
+records your bids, and a bid that was never leading gets no alert.
+
 To test the channel, open Actions, choose "watch", press "Run workflow" and
-tick the auction test: up to 3 favourite auctions arrive with Doorzo's
-end-time text.
+tick the auction test: up to 3 favourite auctions and 3 active bids arrive
+with Doorzo's raw end-time and status text.
 
